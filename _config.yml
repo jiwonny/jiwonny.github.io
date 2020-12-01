@@ -21,6 +21,7 @@ title_separator          : "-"
 subtitle                 : # site tagline that appears below site title in masthead
 name                     : "Jiwonny"
 description              : "개발과 공부 기록하기"
+asset_url                : /assets
 url                      : "https://jiwonny.github.io" # the base hostname & protocol for your site e.g. "https://mmistakes.github.io"
 baseurl                  : # the subpath of your site, e.g. "/blog"
 repository               : "jiwonny/jiwonny.github.io" # GitHub username/repo-name e.g. "mmistakes/minimal-mistakes"
