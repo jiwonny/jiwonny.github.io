@@ -95,7 +95,7 @@ analytics:
 # Site Author
 author:
   name             : "Jiwonny"
-  avatar           : "/assets/images/profile.jpeg"
+  avatar           : "/assets/images/favicon.png"
   bio              : "개발과 공부 기록하기"
   location         : "Seoul"
   email            :
