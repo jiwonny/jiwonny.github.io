@@ -6,3 +6,52 @@
 
 @import "minimal-mistakes/skins/{{ site.minimal_mistakes_skin | default: 'default' }}"; // skin
 @import "minimal-mistakes"; // main partials
+
+@import url('https://fonts.googleapis.com/css2?family=Gothic+A1:wght@100;200;300;400;500;600;700;800;900&family=Noto+Serif+KR:wght@200;300;400;500;600;700;900&display=swap');
+
+html {
+    font-size: 12px; // change to whatever
+    
+    @include breakpoint($medium) {
+      font-size: 13px; // change to whatever
+    }
+  
+    @include breakpoint($large) {
+      font-size: 15px; // change to whatever
+    }
+  
+    @include breakpoint($x-large) {
+      font-size: 16px; // change to whatever
+    }
+}
+
+
+a {
+    /* devinlife : a link 하이퍼링크 밑줄 없애기 */
+    text-decoration: none;
+    &:focus {
+      @extend %tab-focus;
+    }
+}
+
+body {
+  line-height: 1.7;
+}
+
+blockquote {
+  font-style: normal;
+  color: rgb(112, 112, 112);
+  border-left-color: rgb(129, 156, 201);
+}
+
+.language-plaintext {
+  color: rgb(255, 94, 0);
+}
+
+.page__title {
+  font-family: $serif;
+}
+
+h1, h2, h3 {
+  font-family: $serif;
+}
