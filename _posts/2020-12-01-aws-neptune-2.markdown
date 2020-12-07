@@ -57,7 +57,7 @@ Amazon Neptune은 서울 리전도 지원하므로 서울 리전에 해당하는
 **DB instance Type과 EC2 instance Type**을 결정하는 부분인데 기본 설정은 위 사진과 같이 `db.r5.large`와 `r5.2xlarge`로 되어있다. 만약 저대로 두면 요금 폭탄을 맞을 수 있기 때문에 instance 가격을 확인하여 잘 설정하도록 한다.
 <br>
 
-필자는 처음에 default 값으로 해뒀다가 이틀 사이에 요금 폭탄을 맞고 서둘러 바꿨다. 대규모 프로젝트는 아니어서 `db.t3.medium`으로 충분할 것 같아 가장 싼 타입으로 변경했다. EC2 인스턴스는 Neptune 클라이언트로도 쓰지만 웹서버로도 쓰고 있어서 `t2.micro`(프리티어 사용 가능한 타입)이 아닌 `t3.micro`를 선택했다. 인스턴스 타입별 스펙과 가격은 [EC2 온디맨드 요금](https://aws.amazon.com/ko/ec2/pricing/on-demand/)에서 확인할 수 있다.
+나는 처음에 default 값으로 해뒀다가 이틀 사이에 요금 폭탄을 맞고 서둘러 바꿨다. 대규모 프로젝트는 아니어서 `db.t3.medium`으로 충분할 것 같아 가장 싼 타입으로 변경했다. EC2 인스턴스는 Neptune 클라이언트로도 쓰지만 웹서버로도 쓰고 있어서 `t2.micro`(프리티어 사용 가능한 타입)이 아닌 `t3.micro`를 선택했다. 인스턴스 타입별 스펙과 가격은 [EC2 온디맨드 요금](https://aws.amazon.com/ko/ec2/pricing/on-demand/)에서 확인할 수 있다.
 <br>
 
 다음은 **SSH Key Pair**를 선택하는 부분이다. 이전에 EC2 인스턴스를 생성한 적이 있다면, EC2 instance를 원격에서 접속하기 위한 `EC2 SSH key pair`를 발급받았을 것이다. Neptune을 설치하면서 생성하는 EC2에서도 마찬가지로 같은 key를 사용하여 SSH 접속이 가능하다. 드롭다운 목록에서 생성한 key를 선택하고 다음 단계로 넘어가면 된다.
@@ -116,7 +116,7 @@ VPC 콘솔 왼쪽 메뉴에서 서브넷 메뉴를 확인할 수 있을 것이�
 
 VPC에 따라 정렬하면, 새로 생성된 VPC에 해당하는 서브넷이 여러개 있음을 볼 수 있다. 위 사진의 빨간 박스 위에 있는 서브넷은 필자가 별도로 생성한 것이고, 박스 안에 있는 서브넷 네개가 cloudformation을 통해 생성된 서브넷이다. 각각 가용 영역마다 `private subnet`이 생성되어 있고, 하나의 `public subnet`이 생성되었음을 볼 수 있다.
 
-원래는 별도의 이름 없이 생성되지만 필자는 편리한 구분을 위해 가용 영역에 맞게 이름을 설정해뒀다. (`private_2c`는 2c 가용영역에 있는 private subnet을 의미한다.)  
+원래는 별도의 이름 없이 생성되지만 나는 편리한 구분을 위해 가용 영역에 맞게 이름을 설정해뒀다. (`private_2c`는 2c 가용영역에 있는 private subnet을 의미한다.)  
 
 각 가용영역에 있는 private subnet은 Neptune cluster와 관련이 있다. Neptune Console에서 `Writer instance`를 누르면 세 개의 서브넷을 볼 수 있을 것이다. 세 개의 서브넷 모두 private subnet이다. 즉, **Neptune 인스턴스는 VPC 내에서 private subnet에 위치**하는 것이다. 
 
