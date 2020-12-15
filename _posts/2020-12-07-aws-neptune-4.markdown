@@ -1,13 +1,13 @@
 ---
 categories: projects
-title: AWS NEPTUNE 적용기 (4) - 데이터 삽입하기
+title: AWS NEPTUNE 적용기 (4) - Python에서 Neptune 사용하기
 excerpt: "AWS NEPTUNE 적용기 네번째! Python으로 Neptune DB 인스턴스에 연결하고, python을 사용하여 데이터 삽입하기"
 taxonomy: projects
 toc: true
 toc_sticky: true
 toc_label: 목차
 tags:
-    - Gremlin
+    - AWS
     - Python
 author_profile: true
 ---
