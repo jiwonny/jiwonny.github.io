@@ -12,7 +12,7 @@ author_profile: true
 ---
 
 > 메서드가 비동기적으로 동작하는 원리에 대한 글은 아니다.
-> 스프링에서 `@Async` 애노테이션을 사용할 때 어떤 과정을 거쳐 원래 메서드 대신 '비동기적으로 동작하는 메서드'가 실행되는지 알아본 글이다.   
+> 스프링에서 `@Async`를 사용할 때 어떤 과정을 거쳐 원래 메서드 대신 '비동기적으로 동작하는 메서드'가 실행되는지 알아본 글이다.   
 
 ## 들어가며
 이번에 회사에서 '작업 요청 기능'을 새롭게 개발하게 되었다. 
@@ -316,6 +316,8 @@ public @interface EnableAsync {
 AdviceMode mode() default AdviceMode.PROXY;
 ```
 
+![configuration-selector](/assets/images/async-aop/configuration-selector.png)
+
 ### 2. ProxyAsyncConfiguration
 위에서 `@EnableAsync`를 통해 `ProxyAsyncConfiguration`가 import되는 것을 확인했다. 
 그럼 `ProxyAsyncConfiguration`에서는 어떤 일을 할까?
@@ -324,6 +326,7 @@ AdviceMode mode() default AdviceMode.PROXY;
 코드를 확인해보면 `AsyncAnnotationBeanPostProcessor`를 빈으로 등록하고 있다.
 
 "빈 후처리기" (BeanPostProcessor)는 스프링 빈 저장소에 특정 빈을 등록하기 전에 조작한다. 
+![flow2.png](/assets/images/async-aop/flow2.png)
 
 #### BeanPostProcessor의 등장
 여기서 잠깐, BeanPostProcessor가 뭔지 알아보자.
@@ -347,22 +350,22 @@ AdviceMode mode() default AdviceMode.PROXY;
 ![bean-post-processor-flow.png](/assets/images/async-aop/bean-post-processor-flow.png)
 
 
-### AsyncAnnotationBeanPostProcessor
+### 3. AsyncAnnotationBeanPostProcessor
 `ProxyAsyncConfiguration` 에서 `AsyncAnnotationBeanPostProcessor`를 빈으로 등록했다.
 빈 후처리기 역할에 따라, 실제 객체가 '비동기적으로 수행될 수 있도록' 조작해 프록시 객체를 생성하고 이를 빈으로 등록할 것이라 예상해볼 수 있었다.
 그럼 `AsyncAnnotationBeanPostProcessor`는 어떤 방식으로 프록시 객체를 생성하는 걸까? 
 
-`AsyncAnnotationBeanPostProcessor` 클래스의 메서드를 보면 이 빈 후처리기가 하는 일을 크게 세가지로 정리해볼 수 있다.
-1. Executor 설정
-2. annotation type 설정
-3. AsyncAnnotationAdvisor 생성
+`AsyncAnnotationBeanPostProcessor` 클래스의 메서드를 보면 이 빈 후처리기가 하는 일을 크게 세가지로 정리해볼 수 있다. 
+1) Executor 설정
+2) annotation type 설정
+3) AsyncAnnotationAdvisor 생성
 
-#### 1. Executor 설정
+#### 3-1. Executor 설정
 ![async-annotation-bean-post-processor-configure.png](/assets/images/async-aop/async-annotation-bean-post-processor-configure.png)
 이 메서드는 위의 `ProxyAsyncConfiguration`에서 BeanPostProcessor를 등록할 때 호출한다.
 `Executor`를 설정해주고 있는데, 이 `Executor`가 무엇인지는 아래에서 다뤄보겠다.
 
-#### 2. annotation type 설정
+#### 3-2. annotation type 설정
 ![async-annotation-bean-post-processor-set-async-annotation-type.png](/assets/images/async-aop/async-annotation-bean-post-processor-annotation-type.png)
 `@EnableAsync` 애노테이션에서 `annotation` 속성을 설정할 수 있었는데
 이 속성을 `ProxyAsyncConfiguration`에서 
@@ -370,7 +373,7 @@ AdviceMode mode() default AdviceMode.PROXY;
 빈 후처리기에서 하는 일을 생각해보았을 때, 빈 후처리기가 "어떤 애노테이션이 붙은 메서드를 프록시로 만들 것인지" 결정하기 위한 정보를 전달하는 것으로 보인다.
 예상대로 동작하는지도 아래에서 확인해보겠다.
 
-#### 3. AsyncAnnotationAdvisor 생성
+#### 3-3. AsyncAnnotationAdvisor 생성
 ![async-annotation-bean-post-processor.png](/assets/images/async-aop/async-annotation-bean-post-processor-bean-factory.png)
 `setBeanFactory` 에서 `AsyncAnnotationAdvisor`를 생성하고 있다.
 
@@ -400,7 +403,7 @@ AdviceMode mode() default AdviceMode.PROXY;
 
 `AsyncAnnotationAdvisor` 에서 실제로 어떤 `Pointcut`과 `Advice`를 가지고 있는지 확인해보자.
 
-### AsyncAnnotationAdvisor
+### 4. AsyncAnnotationAdvisor
 생성자에서 `Advice`와 `Pointcut`을 생성한다.
 ```java
 public AsyncAnnotationAdvisor(@Nullable Supplier<Executor> executor, @Nullable Supplier<AsyncUncaughtExceptionHandler> exceptionHandler) {
@@ -424,10 +427,12 @@ public AsyncAnnotationAdvisor(@Nullable Supplier<Executor> executor, @Nullable S
 `Advice`를 생성하는 메서드에서는 `ProxyAsyncConfiguration`에서 설정한 `Executor`와 `ExceptionHandler`를 가지고 `AnnotationAsyncExecutionInterceptor`를 생성한다.
 이 `AnnotationAsyncExecutionInterceptor`는 `Advice` 를 구현하고 있다.
 
+![flow3.png](/assets/images/async-aop/flow3.png)
+
 `Advice`는 어떤 부가 기능을 추가할 것인지를 정의하므로, `AnnotationAsyncExecutionInterceptor`의 코드를 확인하면
 어떻게 메서드 호출이 비동기적으로 동작하는지 알 수 있을 것이다.
 
-#### AnnotationAsyncExecutionInterceptor
+### 5. AnnotationAsyncExecutionInterceptor
 `AnnotationAsyncExecutionInterceptor`는 `AsyncExecutionInterceptor`를 상속받고 있어, `AsyncExecutionInterceptor` 코드를 확인해보았다.
 ![async-execution-interceptor.png](/assets/images/async-aop/async-execution-interceptor.png)
 
@@ -437,12 +442,13 @@ public AsyncAnnotationAdvisor(@Nullable Supplier<Executor> executor, @Nullable S
 `doSubmit` 메서드에 `Callable` 객체 뿐만 아니라 `executor`도 전달하고 있는데,
 이 `executor`는 `AsyncTaskExecutor`를 구현한 객체여야 한다.
 
-`doSubmit`을 통해, 
+<b>`doSubmit`을 통해, 
 `AsyncTaskExecutor` 구현체가 제공하는 별도의 스레드 풀에서 스레드를 할당받아 `Callable`을 실행하게 되고, 
-`Callable`은 대상 메서드를 실행하게 된다. 즉, 대상 메서드가 별도의 스레드에서 비동기적으로 실행될 수 있는 것이다.
+`Callable`은 대상 메서드를 실행하게 된다. 즉, 대상 메서드가 별도의 스레드에서 비동기적으로 실행될 수 있는 것이다.</b>
 
 `AsyncTaskExecutor`가 될 `executor`는 `ProxyAsyncConfiguration`에서부터 시작된다.
 `AsyncConfigurer`를 구현한 객체가 빈으로 등록되어 있다면, 해당 빈을 `executor`로 사용하고 그렇지 않다면 기본적으로 `SimpleAsyncTaskExecutor`를 사용한다.
+![flow4.png](/assets/images/async-aop/flow4.png)
 
 [Spring Framework 공식 문서 - SimpleAsyncTaskExecutor](https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/core/task/SimpleAsyncTaskExecutor.html)
 에 따르면, `SimpleAsyncTaskExecutor`는 각 작업에 대해 항상 새로운 스레드를 생성해 비동기적인 작업을 수행한다고 한다.
@@ -462,25 +468,20 @@ public AsyncAnnotationAdvisor(@Nullable Supplier<Executor> executor, @Nullable S
 - `AsyncConfigurer`를 구현한 객체가 빈으로 등록되어 있다면, 해당 빈을 `AsyncTaskExecutor`로 사용하고 그렇지 않다면 기본적으로 `SimpleAsyncTaskExecutor`를 사용한다. 
 
 ## 마무리하며
-글이 길어졌다.
+글이 길어졌다. 왜 `@Async`를 사용하게 됐는지부터 쓰려다보니 생각보다 길다.
 
-이번에 회사에서 새롭게 기능을 개발하면서 처음으로 `@Async`를 써봤다. 이게 어떻게 동작하는지 궁금해서 일단 코드부터 까봤는데, 이해가 안됐다.
+이번에 회사에서 새롭게 기능을 개발하면서 처음으로 `@Async`를 써본 거였다.
 
+이게 어떻게 동작하는지 궁금해서 일단 코드부터 까봤는데, 처음엔 이해가 안됐다.
+그래서 나름 스프링 프록시 인프런 강의도 들어보고, AOP도 조금 공부해봤다.
 
+공부하고 나서 다시 코드를 보니 동작 방식이 점차 이해가 가는게 꽤나 즐거웠다...💪
 
-
-
-
-
-
-
-
-
-
-
-
-
-
+### 참고
+- [https://dzone.com/articles/effective-advice-on-spring-async-part-1](https://dzone.com/articles/effective-advice-on-spring-async-part-1)
+- [https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/scheduling/annotation/Async.html](https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/scheduling/annotation/Async.html)
+- [https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/aop/Advisor.html](https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/aop/Advisor.html)
+- [https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/core/task/SimpleAsyncTaskExecutor.html](https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/core/task/SimpleAsyncTaskExecutor.html)
 
 
 
