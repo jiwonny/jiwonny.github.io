@@ -356,9 +356,9 @@ AdviceMode mode() default AdviceMode.PROXY;
 그럼 `AsyncAnnotationBeanPostProcessor`는 어떤 방식으로 프록시 객체를 생성하는 걸까? 
 
 `AsyncAnnotationBeanPostProcessor` 클래스의 메서드를 보면 이 빈 후처리기가 하는 일을 크게 세가지로 정리해볼 수 있다. 
-1) Executor 설정
-2) annotation type 설정
-3) AsyncAnnotationAdvisor 생성
+1. Executor 설정
+2. annotation type 설정
+3. AsyncAnnotationAdvisor 생성
 
 #### 3-1. Executor 설정
 ![async-annotation-bean-post-processor-configure.png](/assets/images/async-aop/async-annotation-bean-post-processor-configure.png)
