@@ -1,0 +1,476 @@
+---
+categories: study 
+title: "@Async로 맛본 스프링 프록시"
+excerpt: "2023-12-07"
+taxonomy: study
+toc: true
+toc_sticky: true
+toc_label: 목차
+tags:
+    - Spring
+author_profile: true
+---
+<br>
+
+## 들어가며
+이번에 회사에서 '작업 요청 기능'을 새롭게 개발하게 되었다. 
+
+어드민 페이지에서 "이런 저런 작업이 필요해요. 이거 처리해주세요!" 라는 요청을 남기면, 작업자 앱에서 요청을 확인하고 처리할 수 있는 기능이다.
+처음에는 어드민에서 이 작업 지시를 생성하고, 작업자 앱에서 작업 지시를 확인하는 기능만 뚝딱 만들었다.
+
+> 별거 없네!
+
+그런데 이 "작업 요청" 기능은 일을 빠르게 처리하기 위함이라, 작업 요청이 생성되었을 때 관계자들이 이를 빠르게 확인할 수 있다면 더욱 좋을 것 같았다.
+그래서 작업 요청이 생성되었을 때 관계자들에게 빠르게 알릴 수 있는 <b>부가 기능</b>을 넣어보기로 했다. 
+회사 내부 관계자에게는 슬랙으로 알림을 주고, 작업자에게는 작업자 앱으로 푸시 알림을 주는 방식으로.
+
+작업 요청을 생성하는 코드에 이 두 로직을 추가하면 되겠다! 간단한걸! 이라 생각하며 뚝딱의 길로 들어섰다.
+
+```java
+@Service
+@RequiredArgsConstructor
+public class WorkInstructionService {
+    // 생략
+    // 각종 repository, domain service 주입 
+    
+    @Transactional
+    public void createWorkInstruction(Long memberId, String vehicleId, String description, WorkInstructionType instructionType, LocalDateTime requestAt) {
+        Vehicle vehicle = getVehicle(vehicleId);
+        Member instructMember = getMember(memberId);
+        
+        WorkInstructionEntity workInstruction = WorkInstructionEntity.builder()
+                .member(instructMember)
+                .vehicle(vehicle)
+                .description(description)
+                .instructionType(instructionType)
+                .requestAt(requestAt)
+                .build();
+        workInstructionRepository.save(workInstruction);
+        // 여기까지가 기존 작업 요청 생성 코드
+        // ====================================================================
+        
+        // 새롭게 추가한 코드
+        Region contractedRegion = vehicle.getContractedRegion();
+        List<Employee> employees = getEmployeesOfContractedRegion(contractedRegion);
+        List<String> appPushIds = employees.stream()
+                .map(Employee::getAppPushId)
+                .collect(Collectors.toList());
+        sendSlackNotification(workInstruction);
+        sendPushNotification(appPushIds, workInstruction);
+        logPushNotification(appPushIds, workInstruction);
+    }
+}
+```
+
+## 찝찝함을 안고
+슬랙으로 알림을 보내는 친구와 푸시 알림을 보내는 친구를 각자 역할에 맞게 잘 추상화해둔 덕분에 추가하는 코드 자체는 단순했다.
+그런데 마음 한 켠에 약간의 찝찝함이 있었다. 
+- 작업 요청을 생성하는 데 있어서 필수적인 로직이 아닌데, 여기에 같이 있어도 되는걸까? 
+- 부가 기능이 실패하면 작업 요청 생성도 롤백될텐데, 이러면 좀 곤란하겠군...
+
+이런 찝찝함을 안고 개발 환경에 배포해보았다. 코드는 문제없이 동작했다.
+그런데 앱 푸시 요청을 보내고 성공 여부를 받아오는 데까지 생각보다 오랜 시간이 걸렸다.
+대략 100ms 내외에 처리되던 생성 api가 3-4초까지 걸리는 경우가 생겨버렸다.
+
+이건 좀 아닌 것 같다. 작업 요청 생성하는 데 3초나 걸리면 안되는데..?? 🤯
+
+## 요구사항 다시 쓰기
+부가 기능을 처리하는 시간이 작업 요청 생성 api 응답 시간에 영향을 주고 있었다. 
+이 영향을 없애고자 부가 기능을 기존 코드에서 분리해내보기로 했다.
+이 참에 마음 한 켠에 안고 있던 찝찝함도 해소할 수 있을 것 같았다.
+
+나름대로 변경해본 요구사항은 아래와 같다.
+1. 작업 요청을 생성하는 코드에서는 작업 요청 생성에 필수적인 로직만 처리한다.
+2. 부가 기능에 실패해도 작업 요청 생성은 성공해야 한다. (롤백되면 안됨)
+3. 부가 기능을 실행하는 데 걸리는 시간이 작업 요청 생성 api 응답 시간에 영향을 주지 않아야 한다.
+
+## 많이들 아는 이야기, 스프링 이벤트로 해결해보자.
+먼저, 1번과 2번 요구사항을 만족시키기 위해서 <b>"이벤트 발행"</b> 방식을 사용하기로 했다.
+작업 요청 생성 코드에서는 필수적인 로직만 처리하고, 부가 기능은 작업 요청이 생성되었다는 이벤트가 발행되면 처리하는 방식이다.
+이렇게 하면 '작업 요청 생성'과 '알림' 로직을 분리하고 각 코드에서는 <b>단일한 책임</b>만을 가지게 된다.
+
+
+이벤트 발행 / 소비를 구현하기 위해 스프링에서 제공하는 `ApplicationEventPublisher`를 사용했다.
+먼저, <i>'작업 요청 생성 완료'</i>  라는 이벤트를 정의했다.
+```java
+@Data
+@AllArgsConstructor
+public class WorkInstructionCreatedEvent {
+    private final Vehicle vehicle;
+    private final String description;
+    private final WorkInstructionType instructionType;
+    private final Member instructMember;
+    private final LocalDateTime requestAt;
+}
+```
+<br>
+
+그리고 작업 요청 생성 코드에서는 위에서 정의한 이벤트를 발행하도록 했다.
+```java
+@Service
+@RequiredArgsConstructor
+public class WorkInstructionService {
+    private final ApplicationEventPublisher eventPublisher;
+    // 생략
+    // 각종 repository, domain service 주입 
+    
+    @Transactional
+    public void createWorkInstruction(Long memberId, String vehicleId, String description, WorkInstructionType instructionType, LocalDateTime requestAt) {
+        Vehicle vehicle = getVehicle(vehicleId);
+        Member instructMember = getMember(memberId);
+        
+        WorkInstructionEntity workInstruction = WorkInstructionEntity.builder()
+            .member(instructMember)
+            .vehicle(vehicle)
+            .description(description)
+            .instructionType(instructionType)
+            .requestAt(requestAt)
+            .build();
+        workInstructionRepository.save(workInstruction);
+      
+        // 이벤트 발행
+        eventPublisher.publishEvent(new WorkInstructionCreatedEvent(
+            vehicle,
+            description,
+            instructionType,
+            instructMember,
+            requestAt
+        ));
+    }
+}
+```
+<br>
+
+이렇게 <i>'작업 요청 생성 완료'</i> 이벤트를 발행하면, 구독하는 곳에서 이벤트를 소비해 부가 기능을 처리할 수 있다.
+해당 이벤트를 구독하는 `Listner` 를 아래와 같이 추가했다.
+`Listner`에서 슬랙 알림을 보내는 로직, 푸시 알림을 보내는 로직, 로그를 남기는 로직을 구현함으로써 
+각 코드에서 단일한 책임을 가지게끔 했다. (1번 요구사항 만족 ✅)
+- `WorkInstructionService` : 작업 요청을 생성하는 책임
+- `WorkInstructionCreatedListener` : 작업 요청 생성 완료를 외부로 알리는 책임
+
+```java
+@Component
+@RequiredArgsConstructor
+public class WorkInstructionCreatedListener {
+    // 생략
+    // 각종 의존성 주입
+    
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void handleWorkInstructionCreatedEvent(WorkInstructionCreatedEvent event) {
+        Region contractedRegion = event.getVehicle().getContractedRegion();
+        List<Employee> employees = getEmployeesOfContractedRegion(contractedRegion);
+        List<String> appPushIds = employees.stream()
+                .map(Employee::getAppPushId)
+                .collect(Collectors.toList());
+        sendSlackNotification(event);
+        sendPushNotification(appPushIds, event);
+        logPushNotification(appPushIds, event);
+    }
+}
+```
+<br>
+
+위와 같이, `@TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)` 
+애노테이션으로 트랜잭션 커밋 이후에 이벤트를 처리하도록 했다.
+이렇게 하면 부가 기능 처리에 실패하더라도 작업 요청 생성 트랜잭션이 롤백되지 않게 된다. (2번 요구사항 만족 ✅)
+
+
+> 사내에서 앱 푸시 알림을 성공적으로 보낸 경우 RDB에 기록해두고 있다. 
+`logPushNotification()`이 위 역할을 수행하는데, 이 과정을 트랜잭션으로 묶어서 처리하고자 `@Transactional` 애노테이션을 추가했다.
+하지만 `TransactionPhase=AFTER_COMMIT` 옵션을 주었기 때문에, 같은 트랜잭션 내에서는 더이상 새로운 커밋을 허용하지 않는다.
+따라서 새로운 트랜잭션 내에서 로그를 남길 수 있도록 `@Transactional(propagation = Propagation.REQUIRES_NEW)` 옵션을 추가했다.
+
+<br>
+
+## API 응답 시간은 그대로인데?
+스프링 이벤트를 사용해 1번과 2번 요구사항을 만족시킬 수 있었다. 
+하지만, 다시 테스트를 해보아도 작업 요청 생성 api 응답 시간은 여전히 느려진 상태였다.
+
+이유는 요청을 처리하는 스레드에 있었다. `@EventListener`는 이벤트를 발행한 스레드에서 같이 실행된다.
+아래 사진과 같이, 이벤트를 발행한 Service와 이벤트를 구독하는 Listener가 같은 스레드에서 실행되고 있었다.
+![running-same-thread](/assets/images/async-aop/running-same-thread.png)
+<br>
+
+스프링에서는 한 스레드에서 요청을 처리하고 응답을 반환하는데, 같은 스레드에서 이벤트 구독 작업까지 수행한다면
+해당 작업이 끝날 때 까지 스레드가 블록되어 응답을 반환하지 못하는 것이다.
+
+즉, 부가 기능을 실행하는 데 걸리는 시간이 api 응답 시간에 영향을 주지 않으려면 
+'요청을 처리하는 스레드'와 '이벤트를 구독해 부가 기능을 처리하는 스레드'를 분리해야 한다.
+
+이를 위해 스프링에서 제공하는 `@Async` 애노테이션을 사용해보기로 했다.
+
+## @Async로 해결해보자.
+[Spring Framework 공식 문서](https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/scheduling/annotation/Async.html)
+에 나와 있는 설명을 보면 
+> Annotation that marks a method as a candidate for asynchronous execution.
+Can also be used at the type level, in which case all the type's methods are considered as asynchronous.
+
+라고 되어있다. `@Async` 애노테이션을 붙이면 해당 메서드는 '비동기로 실행될 수 있는 후보'가 된다.
+즉, `@Async` 메서드를 호출한 곳에서 `@Async` 메서드가 실행되는 것을 기다리지 않으며
+`@Async` 메서드는 별도의 스레드에서 비동기적으로 실행된다.
+
+그래서 아래와 같이 `@Async` 애노테이션을 붙이고 테스트를 해보았다. 
+`Listener`가 다른 스레드에서 실행될 것을 기대했지만, 여전히 같은 스레드에서 실행되고 있었다.
+```java
+public class WorkInstructionCreatedListener {
+    // 생략
+    // 각종 의존성 주입
+    
+    @Async
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void handleWorkInstructionCreatedEvent(WorkInstructionCreatedEvent event) {
+        // 생략
+    }
+}
+```
+
+![async-same-thread.png](/assets/images/async-aop/async-same-thread.png)
+
+찾아보니, `@Configuration` 클래스에 `@EnableAsync` 애노테이션을 붙여야 비동기적으로 동작할 수 있다고 한다.
+그래서 `@EnableAsync` 애노테이션을 붙이고 다시 테스트를 해보았을 때, 
+`Listener`가 다른 스레드에서 실행되는 것을 확인할 수 있었다.
+
+```java
+@EnableAsync
+@SpringBootApplication
+public class SampleApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(SampleApplication.class, args);
+    }
+}
+
+// ===============================
+@Component
+public class WorkInstructionCreatedListener {
+    // 생략
+    // 각종 의존성 주입
+
+    @Async
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void handleWorkInstructionCreatedEvent(WorkInstructionCreatedEvent event) {
+        // 생략
+    }
+}
+```
+![async-different-thread.png](/assets/images/async-aop/async-different-thread.png)
+
+
+## 이거 어떻게 동작하는거지?
+`@Async`만 붙였을 때에는 비동기적으로 동작하지 않고, `@EnableAsync`를 붙여야 비동기적으로 동작함을 확인했다.
+왜 `@EnableAsync`를 붙여야 하는지, 어떤 과정을 거쳐서 메서드 호출이 비동기적으로 동작하는 것인지 궁금해졌다.
+(이 글을 쓰게 된 이유이기도 하다.) 
+
+이것저것 찾아보다가, [https://dzone.com/articles/effective-advice-on-spring-async-part-1](
+https://dzone.com/articles/effective-advice-on-spring-async-part-1
+) 에서 아래와 같은 설명을 찾았다.
+> When you put an Async annotation on a method underlying it, 
+> it creates a proxy of that object where Async is defined (JDK Proxy/CGlib) based on the proxyTargetClass property. 
+> Then, Spring tries to find a thread pool associated with the context to submit this method's logic as a separate path of execution.
+
+`@Async` 애노테이션을 붙이면 해당 메서드를 감싸는 프록시 객체가 생성되고,
+스프링은 해당 메서드를 별도의 스레드에서 실행할 수 있도록 스레드 풀을 찾아서 메서드를 실행한다고 한다.
+
+프록시? 스레드 풀을 언제 찾는거지? 잘 이해가 가지 않아서 직접 코드를 까보았다. 🛠️
+
+## 코드 까보기
+먼저 `@EnableAsync` 애노테이션이 정의된 코드를 찾아 들어가보았다.
+
+### 1. @EnableAsync
+```java
+@Target(ElementType.TYPE)
+@Retention(RetentionPolicy.RUNTIME)
+@Documented
+@Import(AsyncConfigurationSelector.class)
+public @interface EnableAsync {
+    Class<? extends Annotation> annotation() default Annotation.class;
+    
+    boolean proxyTargetClass() default false;
+    
+    AdviceMode mode() default AdviceMode.PROXY;
+    
+    int order() default Ordered.LOWEST_PRECEDENCE;
+}
+```
+`@EnableAsnyc` 코드를 보면, `@Import` 애노테이션을 통해 `AsyncConfigurationSelector`를 import하고 있다.
+`AsyncConfigurationSelector` 클래스 이름으로만 보았을 때, 아래와 같은 역할을 예상할 수 있었다. 
+1. `@EnableAsync` 애노테이션을 붙였을 때 Async와 관련된 `Configuration`을 추가하는 역할을 할 것 같다.
+2. 조건에 따라 서로 다른 `Configuration` 을 선택하는 역할을 할 것 같다.
+
+아래는 `AsyncConfigurationSelector` 클래스의 코드이다.
+![async-configuration-selector.png](/assets/images/async-aop/async-configuration-selector.png)
+
+
+예상했던 바와 같이, 조건에 따라 서로 다른 `Configuration` 을 선택하는 역할을 수행하고 있었다.
+`AdviceMode`에 따라 다른 `Configuration` 을 추가하는데, 
+기본적으로 `@EnableAsync` 에서는 아래 코드에서 확인할 수 있듯이 `AdviceMode.PROXY`가 기본값으로 설정되어 있다.
+따라서 기본값으로 `ProxyAsyncConfiguration`를 import하게 된다.
+```java
+// @EnableAsync 코드 일부
+AdviceMode mode() default AdviceMode.PROXY;
+```
+
+### 2. ProxyAsyncConfiguration
+위에서 `@EnableAsync`를 통해 `ProxyAsyncConfiguration`가 import되는 것을 확인했다. 
+그럼 `ProxyAsyncConfiguration`에서는 어떤 일을 할까?
+
+![proxy-async-configuration.png](/assets/images/async-aop/proxy-async-configuration.png)
+코드를 확인해보면 `AsyncAnnotationBeanPostProcessor`를 빈으로 등록하고 있다.
+
+"빈 후처리기" (BeanPostProcessor)는 스프링 빈 저장소에 특정 빈을 등록하기 전에 조작한다. 
+
+#### BeanPostProcessor의 등장
+여기서 잠깐, BeanPostProcessor가 뭔지 알아보자.
+
+`A` 객체가 있고 이를 호출할 때 로깅을 더하는 상황을 생각해보자.
+단순히 `A` 객체를 생성하는 코드에 로깅을 추가하면 된다. 
+하지만 이 로깅을 추가하는 부분이 `A` 객체를 생성하는 코드에 들어가지 않게 하려면 어떻게 해야 할까? 
+
+<b>프록시</b> 개념을 사용하면 이런 상황을 해결할 수 있다.
+`A` 객체를 생성하는 코드에 추가적인 동작을 넣지 않고, `A` 객체를 감싸는 프록시 객체를 생성한다.
+그리고 프록시 객체에서는 `A` 객체의 메서드를 호출하기 전에 추가적인 동작을 수행하고, `A` 객체의 메서드를 호출한다.
+`A` 객체의 메서드를 호출하는 곳에서는 `A` 객체를 직접 호출하는 것처럼 보이지만, 실제로는 프록시 객체를 호출하게끔 만든다.
+이렇게 하면 '추가적인 동작'을 `A` 객체 생성 코드에 넣지 않아도 되며, `A` 객체를 직접 호출하는 것처럼 사용할 수 있다.
+
+갑자기 왜 프록시에 대해 이야기를 하냐면, BeanPostProcessor는 프록시를 생성하는 데 사용될 수 있기 때문이다.
+앞서 언급한 것처럼 BeanPostProcessor는 특정 빈을 조작한 뒤 스프링 빈 저장소에 등록할 수 있다.
+위의 예시에 적용해본다면, `A` 객체를 빈으로 등록하는 대신 `A` 객체를 적당히 조작해 프록시 객체를 생성한뒤 이를 빈으로 등록할 수 있는 것이다.
+
+즉, BeanPostProcessor를 사용하면 프록시 객체를 실제 객체 대신 빈으로 등록할 수 있다.
+
+![bean-post-processor-flow.png](/assets/images/async-aop/bean-post-processor-flow.png)
+
+
+### AsyncAnnotationBeanPostProcessor
+`ProxyAsyncConfiguration` 에서 `AsyncAnnotationBeanPostProcessor`를 빈으로 등록했다.
+빈 후처리기 역할에 따라, 실제 객체가 '비동기적으로 수행될 수 있도록' 조작해 프록시 객체를 생성하고 이를 빈으로 등록할 것이라 예상해볼 수 있었다.
+그럼 `AsyncAnnotationBeanPostProcessor`는 어떤 방식으로 프록시 객체를 생성하는 걸까? 
+
+`AsyncAnnotationBeanPostProcessor` 클래스의 메서드를 보면 이 빈 후처리기가 하는 일을 크게 세가지로 정리해볼 수 있다.
+1. Executor 설정
+2. annotation type 설정
+3. AsyncAnnotationAdvisor 생성
+
+#### 1. Executor 설정
+![async-annotation-bean-post-processor-configure.png](/assets/images/async-aop/async-annotation-bean-post-processor-configure.png)
+이 메서드는 위의 `ProxyAsyncConfiguration`에서 BeanPostProcessor를 등록할 때 호출한다.
+`Executor`를 설정해주고 있는데, 이 `Executor`가 무엇인지는 아래에서 다뤄보겠다.
+
+#### 2. annotation type 설정
+![async-annotation-bean-post-processor-set-async-annotation-type.png](/assets/images/async-aop/async-annotation-bean-post-processor-annotation-type.png)
+`@EnableAsync` 애노테이션에서 `annotation` 속성을 설정할 수 있었는데
+이 속성을 `ProxyAsyncConfiguration`에서 
+`bpp.setAsyncAnnotationType(customAsyncAnnotation)` 를 통해 beanPostProcessor에 전달하고 있다.
+빈 후처리기에서 하는 일을 생각해보았을 때, 빈 후처리기가 "어떤 애노테이션이 붙은 메서드를 프록시로 만들 것인지" 결정하기 위한 정보를 전달하는 것으로 보인다.
+예상대로 동작하는지도 아래에서 확인해보겠다.
+
+#### 3. AsyncAnnotationAdvisor 생성
+![async-annotation-bean-post-processor.png](/assets/images/async-aop/async-annotation-bean-post-processor-bean-factory.png)
+`setBeanFactory` 에서 `AsyncAnnotationAdvisor`를 생성하고 있다.
+
+`Advisor` 는 어떤 역할을 수행하길래 `AsyncAnnotationAdvisor`가 필요한 것인지 궁금해졌다.
+
+##### Advisor의 등장
+[Spring Framework 공식 문서 - Advisor](https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/aop/Advisor.html)
+에 따르면,
+> Base interface holding AOP advice (action to take at a joinpoint) and a filter determining the applicability of the advice (such as a pointcut).
+
+라고 되어있다. `Advisor`는 `Pointcut`이라는 친구를 통해 어떤 조인포인트에 어떤 부가 기능(`Advice`)을 적용할지 결정한다.
+
+`Pointcut`은 어디에 부가 기능을 추가할 것인지 결정하는 역할을 수행한다. 
+![pointcut-implementations.png](/assets/images/async-aop/pointcut-implementation.png)
+
+
+
+
+
+
+### AsyncAnnotationAdvisor
+
+#### AnnotationAsyncExecutionInterceptor
+
+#### AnnotationMatchingPointcut
+
+### SimpleAsyncTaskExecutor
+
+### AsyncBeanPostProcessor 빈 등록으로 다시 돌아가서
+다시 `ProxyAsyncConfiguration`로 돌아와서, `AsyncAnnotationBeanPostProcessor`를 빈으로 등록하는 코드를 보자.
+```java
+AsyncAnnotationBeanPostProcessor bpp = new AsyncAnnotationBeanPostProcessor();
+bpp.configure(this.executor, this.exceptionHandler);
+Class<? extends Annotation> customAsyncAnnotation = this.enableAsync.getClass("annotation");
+if (customAsyncAnnotation != AnnotationUtils.getDefaultValue(EnableAsync.class, "annotation")) {
+    bpp.setAsyncAnnotationType(customAsyncAnnotation);
+}
+```
+`bpp.configure` 동작은 이후에 살펴보겠다.
+
+`@EnableAsync` 애노테이션에서 `annotation` 속성을 설정할 수 있었는데
+이 속성을 `bpp.setAsyncAnnotationType(customAsyncAnnotation)` 를 통해 beanPostProcessor에 전달하고 있다.
+빈 후처리기에서 하는 일을 생각해보았을 때,
+빈 후처리기가 "어떤 애노테이션이 붙은 메서드를 프록시로 만들 것인지" 결정하기 위한 정보를 전달하는 것 같다.
+
+예상한 것처럼 실제로 동작하는지 `AsyncAnnotationBeanPostProcessor` 코드를 확인해보았다.
+
+## AsyncConfigurer 구현해보기
+
+
+
+이 빈 후처리기 안의 동작을 보자
+AsyncAnnotationAdvisor를 생성한다
+이 안에서는 advice, pointcut을 생성할 것이라고 유추할 수 있다.
+pointcut에서 async annotation을 찾아낼 수 있도록 설정하고
+advice에서는 pointcut으로 찾은 대상을 어떻게 꾸며줄 것인지 결정할 것이다.
+
+그럼 진짜 안으로 들어가보자
+
+this.advice = buildAdvice(executor, exceptionHandler);
+this.pointcut = buildPointcut(asyncAnnotationType);
+
+exceutor에는 AbstractAsyncConfiguration에서 executor를 설정해준다.
+AsyncConfigurer를 구현한 빈이 있다면 그 빈을 사용하고, 없다면 SimpleAsyncTaskExecutor를 사용한다.
+
+
+buildAdvice 메서드를 보면
+AnnotationAsyncExecutionInterceptor를 생성한다.
+
+이 interceptor에서 프록시에서 어떤 부가 기능을 처리할지 정의한다.
+이 interceptor는 MethodInterceptor를 구현하고 있다.
+
+MethodInterceptor는 invoke 메서드를 구현해야 한다.
+invoke 메서드는 메서드 실행 전후에 수행할 작업을 정의하는데,
+executor를 선택하고 메서드를 callable로 감싸서 executor에 전달하는 방식이다.
+
+pointcut에서는 AnnotationMatchingPointcut으로 Async 애노테이션을 찾는다.
+이 pointcut을 만족하는 메서드가 있다면 위의 advice를 적용한 프록시를 통해 메서드가 실행될 것이다.
+
+그러면 이게 어떻게 비동기로 동작하는가?
+executor에 그 답이 있다.
+
+넘겨진 Executor가 없다면 SimpleAsyncTaskExecutor를 사용한다.
+futureTask를 생성하고, executor.execute(futureTask)를 호출한다.
+
+
+## 마무리하며
+디버깅 모드로 실행해보고
+
+프록시, aop 에 대한 내용도 좀 공부해보고. 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

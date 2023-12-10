@@ -1,7 +1,7 @@
 ---
 categories: projects
 title: AWS NEPTUNE 적용기 (4) - Python에서 Neptune 사용하기
-excerpt: "AWS NEPTUNE 적용기 네번째! Python으로 Neptune DB 인스턴스에 연결하고, python을 사용하여 데이터 삽입하기"
+excerpt: "2020-12-07"
 taxonomy: projects
 toc: true
 toc_sticky: true

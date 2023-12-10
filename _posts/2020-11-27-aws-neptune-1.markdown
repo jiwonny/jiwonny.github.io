@@ -1,7 +1,7 @@
 ---
 categories: projects
 title: AWS NEPTUNE 적용기 (1)
-excerpt: "AWS NEPTUNE 적용기 첫번째! 그래프 데이터베이스와 Amazon Neptune 알아보기"
+excerpt: "2020-11-27"
 taxonomy: projects
 toc: true
 toc_sticky: true

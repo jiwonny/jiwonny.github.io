@@ -1,7 +1,7 @@
 ---
 categories: projects
 title: AWS NEPTUNE 적용기 (5) - Node.js에서 Neptune 사용하기
-excerpt: "AWS NEPTUNE 적용기 다섯번째! Node.js로 Neptune DB에 연결하고 순회하기"
+excerpt: "2020-12-15"
 taxonomy: projects
 toc: true
 toc_sticky: true

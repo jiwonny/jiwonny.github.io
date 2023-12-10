@@ -1,7 +1,7 @@
 ---
 categories: projects
 title: AWS NEPTUNE 적용기 (3) - Gremlin 사용하기
-excerpt: "AWS NEPTUNE 적용기 세번째! Gremlin 콘솔 사용하기"
+excerpt: "2020-12-02"
 taxonomy: projects
 toc: true
 toc_sticky: true

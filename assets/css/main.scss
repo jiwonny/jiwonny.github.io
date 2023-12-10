@@ -11,15 +11,15 @@
 
 html {
     font-size: 13px; // change to whatever
-    
+
     @include breakpoint($medium) {
       font-size: 14px; // change to whatever
     }
-  
+
     @include breakpoint($large) {
       font-size: 16px; // change to whatever
     }
-  
+
     @include breakpoint($x-large) {
       font-size: 17px; // change to whatever
     }
@@ -48,10 +48,14 @@ blockquote {
   color: rgb(255, 94, 0);
 }
 
-.page__title, .site-title {
+.site-title {
   font-family: $serif;
 }
 
+.page-title {
+  font-family: $global-font-family;
+}
+
 h1, h2, h3 {
-  font-family: $serif;
+  font-family: $global-font-family;
 }

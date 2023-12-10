@@ -1,7 +1,7 @@
 ---
 categories: projects
 title: AWS NEPTUNE 적용기 (2) - 설치하기
-excerpt: "AWS NEPTUNE 적용기 두번째! 설치 및 환경설정"
+excerpt: "2020-12-01"
 taxonomy: projects
 toc: true
 toc_sticky: true
