@@ -206,14 +206,29 @@ A 인덱스는 `Index Template`가 이미 설정되어 있어 새로 생성되�
 ## 마치며
 속시원했다. 몇개월간 미뤄둔 일을 해냈다는 것만으로도 몸과 마음이 홀가분해지는 기분..!
 
-비용을 줄여Teksms 
+비용을 줄이기 위해서 이 작업을 시작했지만, 이를 통해서 사내 Elastic Cloud 노드 운영 정책을 검토하고 개선할 수 있었던 것도 큰 수확이었다.
+특히 ILM 정책을 적용하는 과정에서, 어떻게 데이터 티어를 나눌지에 대한 공통된 기준을 정할 수 있었다. 
+
+이 기준에 대한 문서와 ILM 정책을 적용하는 방법 문서를 작성하여 사내에 공유하기도 했다. 
+다른 팀에서도 비용과 클러스터 안정성을 유지한 채로 Elastic Cloud를 사용하기를 바라며.. B 인덱스를 처음 저장할 때처럼 데이터를 핫 노드에만 쌓는 실수가 반복되지 않기를 바라며..! 
+![share-slack](/assets/images/elk-reduce-costs/share-slack.png)
+
+이번에는 ILM 정책을 적용하는 방식으로 비용을 줄였으나, 여전히 운영 측면에서 아직 부족한 점이 많아 보인다. 
+앞서 설명했듯이, 핫 노드가 마스터 노드와 데이터 노드를 겸하고 있어, 데이터 용량 관리가 클러스터 전체 안정성에 영향을 미치게 된다.
+여러 책과 문서에서 권장하듯, 마스터 노드와 데이터 노드를 분리하여 각 노드가 수행하는 역할에 알맞게 리소스를 할당하면 더욱 효율적으로 운영할 수 있을 것이다.
+또한, 공식 문서에서 제안한 방법 중 하나인 '자동 확장 정책'을 적용해볼 수도 있을 것이다. 노드를 조금 더 타이트하게 운영하면서 필요에 따라 확장할 수 있게끔 하면
+비용을 더욱 줄이면서 클러스터 안정성을 유지할 수 있을 거라 기대한다.
+
+비록 이번에 위 작업들을 함께 진행하지는 못했지만, 틈틈히 개선해가면서 더욱 효율적으로 운영해보고 싶다 💪
+
+## 참고
+- [공식 문서 - TOP 5 ways to optimize your elastic cloud costs](https://www.elastic.co/kr/blog/top-5-ways-to-optimize-your-elastic-cloud-costs)
+- [엘라스틱 서치 개발부터 운영까지](https://product.kyobobook.co.kr/detail/S000001932755)
+- [공식 문서 - index-lifecycle-management](https://www.elastic.co/guide/en/elasticsearch/reference/7.9/index-lifecycle-management.html)
+- [공식 문서 - index-template](https://www.elastic.co/guide/en/elasticsearch/reference/current/index-templates.html)
 
 
-- 비용 절감
-- 인덱스 정책 통일
-- 롤오버 (샤딩 수) 정책 통일
-- 방법 문서 작성 후 사내 공유. 
-- 마스터 노드와 데이터 노드 분리 필요성
+
 
 
 
